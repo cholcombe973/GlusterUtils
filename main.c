@@ -1,14 +1,18 @@
-/* 
+/*
  * File:   main.c
  * Author: Chris Holcombe
  *
  * Created on May 8, 2015, 12:39 PM
+ *
+ * Linker flags
+ * -lglfs
+ *
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
-#include "api/glfs.h"
+#include <glusterfs/api/glfs.h>
 #include <string.h>
 #include <getopt.h>
 #include <alloca.h>
@@ -66,13 +70,15 @@ static struct option longopts[] = {
     { 0, 0, 0, 0},
 };
 
-const char *user;
-const char *volume;
-const char *server;
+struct selected_options {
+    const char *user;
+    const char *volume;
+    const char *server;
 
-bool create_user;
-bool get_usage;
-bool get_all_usage;
+    bool create_user;
+    bool get_usage;
+    bool get_all_usage;
+};
 
 void printusage(FILE *file, const char *argv0) {
     fprintf(file, "usage: %s [-h] [-v]\n", argv0);
@@ -88,7 +94,7 @@ void printusage(FILE *file, const char *argv0) {
     fprintf(file, "  -v, --verbose\n");
 }
 
-int parsecmdargs(int argc, const char **argv) {
+int parsecmdargs(int argc, const char **argv, struct selected_options *so){
     int opt;
     int ret;
 
@@ -97,7 +103,7 @@ int parsecmdargs(int argc, const char **argv) {
         return -1;
     }
 
-    if (argc < 2) {
+    if (argc < 8) {
         errno = EINVAL;
         goto out;
     }
@@ -105,8 +111,12 @@ int parsecmdargs(int argc, const char **argv) {
     while ((opt = getopt_long_only(argc, (char* const*) argv, "", longopts, NULL)) != -1) {
         switch (opt) {
             case 'u': /* user name */
-                user = strdup(optarg);
-                if (!user) {
+                //Prevent people from calling this multiple times
+                if (NULL == so->user)
+                    so->user = strdup(optarg);
+
+                //Check for strdup failing
+                if (NULL == so->user) {
                     fprintf(stderr,
                             "[!] failed to save username \"%s\"\n",
                             optarg);
@@ -115,8 +125,10 @@ int parsecmdargs(int argc, const char **argv) {
                 }
                 break;
             case 'l': /* volume name */
-                volume = strdup(optarg);
-                if (!volume) {
+                //Prevent people from calling this multiple times
+                if (NULL == so->volume)
+                    volume = strdup(optarg);
+                if (NULL == so->volume) {
                     fprintf(stderr,
                             "[!] failed to save volumename \"%s\"\n",
                             optarg);
@@ -124,21 +136,27 @@ int parsecmdargs(int argc, const char **argv) {
                     goto out;
                 }
                 break;
-            case 's': /* volume name */
-                server = strdup(optarg);
-                if (!server) {
+            case 's': /* server name */
+                //Prevent people from calling this multiple times
+                if (NULL == so->server)
+                    server = strdup(optarg);
+                if (NULL == so->server) {
                     fprintf(stderr,
                             "[!] failed to save server \"%s\"\n",
                             optarg);
                     errno = EINVAL;
                     goto out;
                 }
+                break;
             case 'c': /* create the user */
-                create_user = true;
+                so->create_user = true;
+                break;
             case 'g': /* get the user's usage */
-                get_usage = true;
+                so->get_usage = true;
+                break;
             case 'a': /* get the entire volume usage*/
-                get_all_usage = true;
+                so->get_all_usage = true;
+                break;
             case 'h': /* help */
                 printusage(stdout, argv[0]);
                 return 1;
@@ -147,6 +165,8 @@ int parsecmdargs(int argc, const char **argv) {
                 goto out;
         }
     }
+    /** verify all required arguments have been set */
+    /* At least one boolean is true and all required args are set */
     return 0;
 out:
     printusage(stderr, argv[0]);
@@ -174,8 +194,16 @@ int main(int argc, char** argv) {
     int ret = 0;
     glfs_t *fs = NULL;
     glfs_fd_t *fd = NULL;
+    struct selected_options so = {
+        .user = NULL,
+        .volume = NULL,
+        .server = NULL,
+        .create_user = FALSE,
+        .get_usage = FALSE,
+        .get_all_usage = FALSE,
+    };
 
-    parsecmdargs(argc, argv);
+    parsecmdargs(argc, argv, &so);
     /*
     if (argc != 4) {
         printf("Expected the following arguments\n\t%s <volname> <hostname> <username>\n", argv[0]);
